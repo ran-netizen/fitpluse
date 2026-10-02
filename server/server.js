@@ -1,15 +1,13 @@
+require('dotenv').config();
+
 const dns = require('dns');
 dns.setDefaultResultOrder('ipv4first');
 
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const workoutRoutes = require('./routes/workoutRoutes');
-
-// Load environment variables
-dotenv.config();
 
 // Connect to MongoDB
 connectDB();
@@ -39,4 +37,5 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+  console.log(`Email service configured with: ${process.env.EMAIL_USER ? process.env.EMAIL_USER : 'None'}`);
 });

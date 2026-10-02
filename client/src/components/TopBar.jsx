@@ -26,9 +26,7 @@ const TopBar = ({ activeTab, setActiveTab, onOpenMobileSidebar }) => {
   const { user, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [isVerified, setIsVerified] = useState(() => {
-    return localStorage.getItem('fitpulse_verified') !== 'false';
-  });
+  const isVerified = user?.isVerified !== false;
 
   const profileRef = useRef(null);
   const notifRef = useRef(null);
@@ -49,11 +47,6 @@ const TopBar = ({ activeTab, setActiveTab, onOpenMobileSidebar }) => {
 
   const tabInfo = TAB_TITLES[activeTab] || { title: 'Dashboard', breadcrumb: 'FitPulse' };
 
-  const handleToggleVerification = () => {
-    const newState = !isVerified;
-    setIsVerified(newState);
-    localStorage.setItem('fitpulse_verified', newState ? 'true' : 'false');
-  };
 
   return (
     <header className="h-16 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-30 px-4 sm:px-6 flex items-center justify-between">
@@ -82,14 +75,13 @@ const TopBar = ({ activeTab, setActiveTab, onOpenMobileSidebar }) => {
       {/* Right: Actions, Status Pill, Notifications, Profile Dropdown */}
       <div className="flex items-center gap-2.5 sm:gap-4">
         {/* User Status Pill (Verified / Pending) */}
-        <button
-          onClick={handleToggleVerification}
-          className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all cursor-pointer ${
+        <div
+          className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
             isVerified
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-              : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
           }`}
-          title="Click to toggle email verification status"
+          title={isVerified ? 'Account is verified' : 'Account pending email verification'}
         >
           {isVerified ? (
             <>
@@ -102,7 +94,7 @@ const TopBar = ({ activeTab, setActiveTab, onOpenMobileSidebar }) => {
               <span>Pending Verification</span>
             </>
           )}
-        </button>
+        </div>
 
         {/* Quick Action: + Log Workout */}
         {activeTab !== 'workouts' && (
