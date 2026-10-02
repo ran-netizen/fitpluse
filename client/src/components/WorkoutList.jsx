@@ -16,7 +16,8 @@ const WorkoutList = ({ workouts, onDeleteWorkout, loading }) => {
   const [deletingId, setDeletingId] = useState(null);
   const [exporting, setExporting] = useState(false);
 
-  const filteredWorkouts = workouts.filter((w) => {
+  const safeWorkouts = Array.isArray(workouts) ? workouts : [];
+  const filteredWorkouts = safeWorkouts.filter((w) => {
     const title = (w.title || w.exercise || '').toLowerCase();
     return title.includes(searchTerm.toLowerCase());
   });

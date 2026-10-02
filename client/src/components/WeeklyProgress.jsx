@@ -60,8 +60,9 @@ const WeeklyProgress = ({ workouts }) => {
 
   const startOfWeek = getStartOfWeek();
 
-  // Filter workouts for current week
-  const thisWeekWorkouts = workouts.filter((w) => {
+  // Filter workouts for current week (safely guarded)
+  const safeWorkouts = Array.isArray(workouts) ? workouts : [];
+  const thisWeekWorkouts = safeWorkouts.filter((w) => {
     const wDate = new Date(w.createdAt);
     return wDate >= startOfWeek;
   });

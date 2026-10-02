@@ -1,8 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import WeeklyProgress from './WeeklyProgress';
-import WorkoutForm from './WorkoutForm';
-import WorkoutList from './WorkoutList';
+import Sidebar from './Sidebar';
+import TopBar from './TopBar';
+import OverviewView from './views/OverviewView';
+import WorkoutsView from './views/WorkoutsView';
+import NutritionView from './views/NutritionView';
+import AnalyticsView from './views/AnalyticsView';
+import ProfileView from './views/ProfileView';
+import {
+  LayoutDashboard,
+  Dumbbell,
+  Utensils,
+  TrendingUp,
+  Settings
+} from 'lucide-react';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -10,12 +21,18 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Tab & Shell Navigation state
+  const [activeTab, setActiveTab] = useState('overview');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
   // Fetch all workouts for current user
   const fetchWorkouts = async () => {
     if (!user || !user.token) return;
 
     try {
       setLoading(true);
+      setError(null);
       const res = await fetch('/api/workouts', {
         headers: {
           Authorization: `Bearer ${user.token}`,
@@ -27,9 +44,12 @@ const Dashboard = () => {
         throw new Error(data.error || 'Failed to fetch workouts');
       }
 
-      setWorkouts(data);
+      // Defensive guard against non-array response
+      setWorkouts(Array.isArray(data) ? data : []);
     } catch (err) {
+      console.error('Fetch workouts error:', err);
       setError(err.message);
+      setWorkouts([]);
     } finally {
       setLoading(false);
     }
@@ -41,7 +61,10 @@ const Dashboard = () => {
 
   // Handle adding new workout
   const handleWorkoutAdded = (newWorkout) => {
-    setWorkouts((prev) => [newWorkout, ...prev]);
+    setWorkouts((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      return [newWorkout, ...current];
+    });
   };
 
   // Handle deleting workout
@@ -59,52 +82,144 @@ const Dashboard = () => {
         throw new Error(data.error || 'Failed to delete workout');
       }
 
-      setWorkouts((prev) => prev.filter((w) => w._id !== id));
+      setWorkouts((prev) => {
+        const current = Array.isArray(prev) ? prev : [];
+        return current.filter((w) => w._id !== id);
+      });
     } catch (err) {
       alert(`Error deleting workout: ${err.message}`);
     }
   };
 
+  const safeWorkouts = Array.isArray(workouts) ? workouts : [];
+
   return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Top Banner Greeting */}
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-        <div>
-          <h2 className="text-2xl font-extrabold text-white tracking-tight">
-            Welcome back, <span className="text-emerald-400">{user.name}</span> 👋
-          </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Log your training sets today and stay on track with your fitness goals.
-          </p>
-        </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      {/* 1. Collapsible/Fixed Left Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        workoutsCount={safeWorkouts.length}
+        isCollapsed={isSidebarCollapsed}
+        setIsCollapsed={setIsSidebarCollapsed}
+        isMobileOpen={isMobileSidebarOpen}
+        setIsMobileOpen={setIsMobileSidebarOpen}
+      />
+
+      {/* Main Content Area (adjusted with dynamic left padding on desktop) */}
+      <div
+        className={`flex-1 flex flex-col transition-all duration-300 ${
+          isSidebarCollapsed ? 'lg:pl-20' : 'lg:pl-64'
+        }`}
+      >
+        {/* 2. Top Bar */}
+        <TopBar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+        />
+
+        {/* Global Error Banner */}
+        {error && (
+          <div className="mx-4 sm:mx-8 mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center justify-between">
+            <span>⚠️ Error syncing records: {error}</span>
+            <button
+              onClick={fetchWorkouts}
+              className="text-white bg-red-500/20 px-2.5 py-1 rounded-lg hover:bg-red-500/30 font-semibold"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* 3. Main View Area: Render only the active tab */}
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 pb-20 lg:pb-8 max-w-7xl w-full mx-auto">
+          {activeTab === 'overview' && (
+            <OverviewView
+              workouts={safeWorkouts}
+              user={user}
+              setActiveTab={setActiveTab}
+              onWorkoutAdded={handleWorkoutAdded}
+              token={user?.token}
+            />
+          )}
+
+          {activeTab === 'workouts' && (
+            <WorkoutsView
+              workouts={safeWorkouts}
+              onWorkoutAdded={handleWorkoutAdded}
+              onDeleteWorkout={handleDeleteWorkout}
+              loading={loading}
+              token={user?.token}
+            />
+          )}
+
+          {activeTab === 'nutrition' && <NutritionView />}
+
+          {activeTab === 'analytics' && (
+            <AnalyticsView workouts={safeWorkouts} />
+          )}
+
+          {activeTab === 'profile' && <ProfileView />}
+        </main>
       </div>
 
-      {error && (
-        <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-          ⚠️ {error}
-        </div>
-      )}
+      {/* Mobile Bottom Navigation Bar for quick access */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/90 backdrop-blur-md border-t border-slate-800 flex items-center justify-around py-2 px-2">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`flex flex-col items-center py-1 px-3 rounded-xl text-[10px] font-semibold transition-all ${
+            activeTab === 'overview' ? 'text-emerald-400 font-bold' : 'text-slate-400'
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5 mb-0.5" />
+          <span>Overview</span>
+        </button>
 
-      {/* Weekly Progress & Goal Tracker */}
-      <WeeklyProgress workouts={workouts} />
+        <button
+          onClick={() => setActiveTab('workouts')}
+          className={`flex flex-col items-center py-1 px-3 rounded-xl text-[10px] font-semibold transition-all relative ${
+            activeTab === 'workouts' ? 'text-emerald-400 font-bold' : 'text-slate-400'
+          }`}
+        >
+          <Dumbbell className="w-5 h-5 mb-0.5" />
+          <span>Workouts</span>
+          {safeWorkouts.length > 0 && (
+            <span className="absolute top-0 right-2 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          )}
+        </button>
 
-      {/* Main Grid: Form (Workout Logger) & List */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-        {/* Left Column: Workout Logger Form */}
-        <div className="lg:col-span-1">
-          <WorkoutForm onWorkoutAdded={handleWorkoutAdded} token={user.token} />
-        </div>
+        <button
+          onClick={() => setActiveTab('nutrition')}
+          className={`flex flex-col items-center py-1 px-3 rounded-xl text-[10px] font-semibold transition-all ${
+            activeTab === 'nutrition' ? 'text-emerald-400 font-bold' : 'text-slate-400'
+          }`}
+        >
+          <Utensils className="w-5 h-5 mb-0.5" />
+          <span>Nutrition</span>
+        </button>
 
-        {/* Right Column: Workout History List */}
-        <div className="lg:col-span-2">
-          <WorkoutList
-            workouts={workouts}
-            onDeleteWorkout={handleDeleteWorkout}
-            loading={loading}
-          />
-        </div>
-      </div>
-    </main>
+        <button
+          onClick={() => setActiveTab('analytics')}
+          className={`flex flex-col items-center py-1 px-3 rounded-xl text-[10px] font-semibold transition-all ${
+            activeTab === 'analytics' ? 'text-emerald-400 font-bold' : 'text-slate-400'
+          }`}
+        >
+          <TrendingUp className="w-5 h-5 mb-0.5" />
+          <span>Analytics</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={`flex flex-col items-center py-1 px-3 rounded-xl text-[10px] font-semibold transition-all ${
+            activeTab === 'profile' ? 'text-emerald-400 font-bold' : 'text-slate-400'
+          }`}
+        >
+          <Settings className="w-5 h-5 mb-0.5" />
+          <span>Settings</span>
+        </button>
+      </nav>
+    </div>
   );
 };
 
