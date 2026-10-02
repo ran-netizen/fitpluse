@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -41,6 +41,11 @@ const Dashboard = () => {
 
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 401) {
+          // Stale session or deleted user -> gracefully reset session
+          logout();
+          return;
+        }
         throw new Error(data.error || 'Failed to fetch workouts');
       }
 

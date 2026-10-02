@@ -1,13 +1,7 @@
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const User = require('../models/User');
 const { generateOtp, sendVerificationEmail } = require('../utils/emailService');
-
-// In-memory fallback users for offline development
-const inMemoryUsers = [];
-
-const isDbConnected = () => mongoose.connection.readyState === 1;
 
 const generateToken = (id) => {
   return jwt.sign(
@@ -15,32 +9,6 @@ const generateToken = (id) => {
     process.env.JWT_SECRET || 'fitness_logger_academic_secret_key_2026',
     { expiresIn: '7d' }
   );
-};
-
-const getInMemoryUserById = (id) => {
-  return inMemoryUsers.find((u) => u._id.toString() === id.toString());
-};
-
-const calculateNutritionHelper = (weight, goal, customCal, customProt) => {
-  const userWeight = weight && Number(weight) > 0 ? Number(weight) : 70;
-  const recommendedProtein = Math.round(userWeight * 2.0);
-  const baseMaintenance = Math.round(userWeight * 32);
-
-  let recommendedCalories = baseMaintenance;
-  if (goal === 'lose_fat') {
-    recommendedCalories = Math.max(baseMaintenance - 400, 1200);
-  } else if (goal === 'build_muscle') {
-    recommendedCalories = baseMaintenance + 300;
-  }
-
-  return {
-    calorieTarget: customCal !== null && customCal !== undefined ? Number(customCal) : recommendedCalories,
-    proteinTarget: customProt !== null && customProt !== undefined ? Number(customProt) : recommendedProtein,
-    recommendedCalories,
-    recommendedProtein,
-    isCustomCalorie: customCal !== null && customCal !== undefined,
-    isCustomProtein: customProt !== null && customProt !== undefined
-  };
 };
 
 // @desc    Register a new user & generate 6-digit OTP
@@ -65,77 +33,30 @@ const registerUser = async (req, res) => {
   console.log(`[AUTH REGISTER ATTEMPT]`);
   console.log(`Email: "${normalizedEmail}"`);
   console.log(`Name: "${normalizedName}"`);
-  console.log(`Database Connected: ${isDbConnected()} (readyState: ${mongoose.connection.readyState}, DB: ${mongoose.connection.name || 'none'})`);
+  console.log(`Database: ${mongoose.connection.name || 'none'}`);
   console.log(`========================================\n`);
 
   try {
     const otp = generateOtp();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    if (isDbConnected()) {
-      let user = await User.findOne({ email: normalizedEmail });
+    let user = await User.findOne({ email: normalizedEmail });
 
-      if (user) {
-        if (user.isVerified) {
-          console.log(`[AUTH REGISTER] User already exists & verified: "${normalizedEmail}"`);
-          return res.status(400).json({ error: 'An account with this email already exists. Please sign in.' });
-        }
-
-        // Account exists but unverified: update name, password & send fresh code
-        console.log(`[AUTH REGISTER] Unverified account exists. Reissuing OTP for "${normalizedEmail}"...`);
-        user.name = normalizedName;
-        user.password = password; // Pre-save hook will rehash
-        user.verificationOtp = otp;
-        user.verificationOtpExpires = otpExpires;
-        await user.save();
-
-        await sendVerificationEmail(normalizedEmail, otp, user.name);
-
-        return res.status(200).json({
-          message: 'Verification code sent to your email. Please enter the 6-digit code to complete registration.',
-          email: normalizedEmail,
-          requireVerification: true
-        });
-      }
-
-      // New registration
-      user = await User.create({
-        name: normalizedName,
-        email: normalizedEmail,
-        password,
-        verificationOtp: otp,
-        verificationOtpExpires: otpExpires,
-        isVerified: false
-      });
-
-      console.log(`[AUTH REGISTER SUCCESS] Pending unverified user saved to Atlas: ${user._id}`);
-      await sendVerificationEmail(normalizedEmail, otp, user.name);
-
-      return res.status(201).json({
-        message: 'Account created! Please enter the 6-digit verification code sent to your email.',
-        email: normalizedEmail,
-        requireVerification: true
-      });
-    }
-
-    // Fallback in-memory
-    console.log(`[AUTH REGISTER IN-MEMORY] Registering in local store...`);
-    let existingIndex = inMemoryUsers.findIndex((u) => u.email === normalizedEmail);
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    if (existingIndex !== -1) {
-      if (inMemoryUsers[existingIndex].isVerified) {
+    if (user) {
+      if (user.isVerified) {
+        console.log(`[AUTH REGISTER] User already exists & verified: "${normalizedEmail}"`);
         return res.status(400).json({ error: 'An account with this email already exists. Please sign in.' });
       }
 
-      inMemoryUsers[existingIndex].name = normalizedName;
-      inMemoryUsers[existingIndex].password = hashedPassword;
-      inMemoryUsers[existingIndex].verificationOtp = otp;
-      inMemoryUsers[existingIndex].verificationOtpExpires = otpExpires;
+      // Account exists but unverified: update name, password & send fresh code
+      console.log(`[AUTH REGISTER] Unverified account exists in MongoDB Atlas. Reissuing OTP for "${normalizedEmail}"...`);
+      user.name = normalizedName;
+      user.password = password; // Pre-save hook will rehash
+      user.verificationOtp = otp;
+      user.verificationOtpExpires = otpExpires;
+      await user.save();
 
-      await sendVerificationEmail(normalizedEmail, otp, normalizedName);
+      await sendVerificationEmail(normalizedEmail, otp, user.name);
 
       return res.status(200).json({
         message: 'Verification code sent to your email. Please enter the 6-digit code to complete registration.',
@@ -144,23 +65,18 @@ const registerUser = async (req, res) => {
       });
     }
 
-    const newUser = {
-      _id: new mongoose.Types.ObjectId(),
+    // New permanent registration in MongoDB Atlas
+    user = await User.create({
       name: normalizedName,
       email: normalizedEmail,
-      password: hashedPassword,
+      password,
       verificationOtp: otp,
       verificationOtpExpires: otpExpires,
-      isVerified: false,
-      weight: 70,
-      fitnessGoal: 'maintain',
-      customCalorieTarget: null,
-      customProteinTarget: null,
-      createdAt: new Date().toISOString()
-    };
-    inMemoryUsers.push(newUser);
+      isVerified: false
+    });
 
-    await sendVerificationEmail(normalizedEmail, otp, normalizedName);
+    console.log(`[AUTH REGISTER SUCCESS] New user permanently saved to MongoDB Atlas: ${user._id}`);
+    await sendVerificationEmail(normalizedEmail, otp, user.name);
 
     return res.status(201).json({
       message: 'Account created! Please enter the 6-digit verification code sent to your email.',
@@ -192,54 +108,8 @@ const verifyEmail = async (req, res) => {
   console.log(`========================================\n`);
 
   try {
-    if (isDbConnected()) {
-      const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({ email: normalizedEmail });
 
-      if (!user) {
-        return res.status(404).json({ error: 'No account found with this email address' });
-      }
-
-      if (user.isVerified) {
-        return res.status(400).json({ error: 'Account is already verified. Please sign in directly.' });
-      }
-
-      if (!user.verificationOtp || user.verificationOtp !== cleanOtp) {
-        console.log(`[AUTH VERIFY FAILED] Invalid code for ${normalizedEmail}. Expected: ${user.verificationOtp}, Received: ${cleanOtp}`);
-        return res.status(400).json({ error: 'Invalid verification code. Please check your email and try again.' });
-      }
-
-      if (!user.verificationOtpExpires || new Date() > new Date(user.verificationOtpExpires)) {
-        console.log(`[AUTH VERIFY FAILED] Code expired for ${normalizedEmail}`);
-        return res.status(400).json({ error: 'Verification code has expired. Please request a new code.' });
-      }
-
-      // Mark user as verified and clear OTP
-      user.isVerified = true;
-      user.verificationOtp = null;
-      user.verificationOtpExpires = null;
-      await user.save();
-
-      console.log(`[AUTH VERIFY SUCCESS] Account activated for: ${user.email} (${user._id})`);
-
-      const nutrition = user.getCalculatedNutrition();
-      const token = generateToken(user._id);
-
-      return res.status(200).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isVerified: user.isVerified,
-        weight: user.weight,
-        fitnessGoal: user.fitnessGoal,
-        customCalorieTarget: user.customCalorieTarget,
-        customProteinTarget: user.customProteinTarget,
-        nutrition,
-        token
-      });
-    }
-
-    // In-memory fallback
-    const user = inMemoryUsers.find((u) => u.email === normalizedEmail);
     if (!user) {
       return res.status(404).json({ error: 'No account found with this email address' });
     }
@@ -249,23 +119,24 @@ const verifyEmail = async (req, res) => {
     }
 
     if (!user.verificationOtp || user.verificationOtp !== cleanOtp) {
+      console.log(`[AUTH VERIFY FAILED] Invalid code for ${normalizedEmail}. Expected: ${user.verificationOtp}, Received: ${cleanOtp}`);
       return res.status(400).json({ error: 'Invalid verification code. Please check your email and try again.' });
     }
 
     if (!user.verificationOtpExpires || new Date() > new Date(user.verificationOtpExpires)) {
+      console.log(`[AUTH VERIFY FAILED] Code expired for ${normalizedEmail}`);
       return res.status(400).json({ error: 'Verification code has expired. Please request a new code.' });
     }
 
+    // Mark user as verified and clear OTP
     user.isVerified = true;
     user.verificationOtp = null;
     user.verificationOtpExpires = null;
+    await user.save();
 
-    const nutrition = calculateNutritionHelper(
-      user.weight,
-      user.fitnessGoal,
-      user.customCalorieTarget,
-      user.customProteinTarget
-    );
+    console.log(`[AUTH VERIFY SUCCESS] Account permanently activated on MongoDB Atlas: ${user.email} (${user._id})`);
+
+    const nutrition = user.getCalculatedNutrition();
     const token = generateToken(user._id);
 
     return res.status(200).json({
@@ -302,30 +173,8 @@ const resendVerificationCode = async (req, res) => {
     const otp = generateOtp();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-    if (isDbConnected()) {
-      const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({ email: normalizedEmail });
 
-      if (!user) {
-        return res.status(404).json({ error: 'No account found with this email' });
-      }
-
-      if (user.isVerified) {
-        return res.status(400).json({ error: 'Account is already verified. You can sign in directly.' });
-      }
-
-      user.verificationOtp = otp;
-      user.verificationOtpExpires = otpExpires;
-      await user.save();
-
-      await sendVerificationEmail(normalizedEmail, otp, user.name);
-
-      return res.status(200).json({
-        message: 'A fresh 6-digit verification code has been dispatched to your email.'
-      });
-    }
-
-    // In-memory fallback
-    const user = inMemoryUsers.find((u) => u.email === normalizedEmail);
     if (!user) {
       return res.status(404).json({ error: 'No account found with this email' });
     }
@@ -336,6 +185,7 @@ const resendVerificationCode = async (req, res) => {
 
     user.verificationOtp = otp;
     user.verificationOtpExpires = otpExpires;
+    await user.save();
 
     await sendVerificationEmail(normalizedEmail, otp, user.name);
 
@@ -358,72 +208,32 @@ const loginUser = async (req, res) => {
     return res.status(400).json({ error: 'Please provide both email and password' });
   }
 
-  // 1. Lowercase and trim email
   const normalizedEmail = String(email).toLowerCase().trim();
 
   console.log(`\n========================================`);
   console.log(`[AUTH LOGIN ATTEMPT]`);
   console.log(`Email provided: "${normalizedEmail}"`);
-  console.log(`Database Connected: ${isDbConnected()} (readyState: ${mongoose.connection.readyState}, DB: ${mongoose.connection.name || 'none'})`);
+  console.log(`Database: ${mongoose.connection.name || 'none'}`);
   console.log(`========================================\n`);
 
   try {
-    if (isDbConnected()) {
-      const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({ email: normalizedEmail });
 
-      if (!user) {
-        console.log(`[AUTH FIND RESULT]: null (No user found for "${normalizedEmail}")`);
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-
-      // Check password
-      const isPasswordMatch = await user.matchPassword(password);
-      if (!isPasswordMatch) {
-        console.log(`[AUTH FAILED] Password mismatch for user: "${normalizedEmail}"`);
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-
-      // Check verification status
-      if (!user.isVerified) {
-        console.log(`[AUTH LOGIN WARNING] User "${normalizedEmail}" is not verified.`);
-        return res.status(403).json({
-          error: 'Please verify your email to continue',
-          isVerified: false,
-          requireVerification: true,
-          email: normalizedEmail
-        });
-      }
-
-      console.log(`[AUTH LOGIN SUCCESS] Logged in verified user: "${user.name}" (${user._id})`);
-
-      const nutrition = user.getCalculatedNutrition();
-
-      return res.status(200).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isVerified: user.isVerified,
-        weight: user.weight,
-        fitnessGoal: user.fitnessGoal,
-        customCalorieTarget: user.customCalorieTarget,
-        customProteinTarget: user.customProteinTarget,
-        nutrition,
-        token: generateToken(user._id)
-      });
-    }
-
-    // Fallback in-memory
-    const user = inMemoryUsers.find((u) => u.email === normalizedEmail);
     if (!user) {
+      console.log(`[AUTH FIND RESULT]: null (No user found for "${normalizedEmail}" in DB: ${mongoose.connection.name})`);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    const isPasswordMatch = await bcrypt.compare(password, user.password);
+    // Check password
+    const isPasswordMatch = await user.matchPassword(password);
     if (!isPasswordMatch) {
+      console.log(`[AUTH FAILED] Password mismatch for user: "${normalizedEmail}"`);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Check verification status
     if (!user.isVerified) {
+      console.log(`[AUTH LOGIN WARNING] User "${normalizedEmail}" is not verified.`);
       return res.status(403).json({
         error: 'Please verify your email to continue',
         isVerified: false,
@@ -432,12 +242,9 @@ const loginUser = async (req, res) => {
       });
     }
 
-    const nutrition = calculateNutritionHelper(
-      user.weight,
-      user.fitnessGoal,
-      user.customCalorieTarget,
-      user.customProteinTarget
-    );
+    console.log(`[AUTH LOGIN SUCCESS] Logged in verified user: "${user.name}" (${user._id})`);
+
+    const nutrition = user.getCalculatedNutrition();
 
     return res.status(200).json({
       _id: user._id,
@@ -473,40 +280,7 @@ const updateNutritionTargets = async (req, res) => {
       return res.status(400).json({ error: 'Weight must be a positive number' });
     }
 
-    if (isDbConnected()) {
-      const user = await User.findById(req.user._id);
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      if (weight !== undefined) user.weight = Number(weight);
-      if (fitnessGoal) user.fitnessGoal = fitnessGoal;
-      if (customCalorieTarget !== undefined) {
-        user.customCalorieTarget = customCalorieTarget === null || customCalorieTarget === '' ? null : Number(customCalorieTarget);
-      }
-      if (customProteinTarget !== undefined) {
-        user.customProteinTarget = customProteinTarget === null || customProteinTarget === '' ? null : Number(customProteinTarget);
-      }
-
-      await user.save();
-
-      const nutrition = user.getCalculatedNutrition();
-
-      return res.status(200).json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isVerified: user.isVerified,
-        weight: user.weight,
-        fitnessGoal: user.fitnessGoal,
-        customCalorieTarget: user.customCalorieTarget,
-        customProteinTarget: user.customProteinTarget,
-        nutrition
-      });
-    }
-
-    // In-memory fallback
-    const user = getInMemoryUserById(req.user._id);
+    const user = await User.findById(req.user._id);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
@@ -520,12 +294,9 @@ const updateNutritionTargets = async (req, res) => {
       user.customProteinTarget = customProteinTarget === null || customProteinTarget === '' ? null : Number(customProteinTarget);
     }
 
-    const nutrition = calculateNutritionHelper(
-      user.weight,
-      user.fitnessGoal,
-      user.customCalorieTarget,
-      user.customProteinTarget
-    );
+    await user.save();
+
+    const nutrition = user.getCalculatedNutrition();
 
     return res.status(200).json({
       _id: user._id,
@@ -548,7 +319,7 @@ const updateNutritionTargets = async (req, res) => {
 // @route   GET /api/auth/me
 // @access  Private
 const getMe = async (req, res) => {
-  if (isDbConnected()) {
+  try {
     const user = await User.findById(req.user._id).select('-password');
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -565,30 +336,10 @@ const getMe = async (req, res) => {
       customProteinTarget: user.customProteinTarget,
       nutrition
     });
+  } catch (error) {
+    console.error(`[GET ME ERROR]:`, error.message);
+    return res.status(500).json({ error: error.message });
   }
-
-  // In-memory
-  const user = getInMemoryUserById(req.user._id);
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
-  }
-  const nutrition = calculateNutritionHelper(
-    user.weight,
-    user.fitnessGoal,
-    user.customCalorieTarget,
-    user.customProteinTarget
-  );
-  return res.status(200).json({
-    _id: user._id,
-    name: user.name,
-    email: user.email,
-    isVerified: user.isVerified,
-    weight: user.weight,
-    fitnessGoal: user.fitnessGoal,
-    customCalorieTarget: user.customCalorieTarget,
-    customProteinTarget: user.customProteinTarget,
-    nutrition
-  });
 };
 
 module.exports = {
@@ -597,6 +348,5 @@ module.exports = {
   resendVerificationCode,
   loginUser,
   updateNutritionTargets,
-  getMe,
-  getInMemoryUserById
+  getMe
 };
