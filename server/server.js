@@ -39,3 +39,4 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
   console.log(`Email service configured with: ${process.env.EMAIL_USER ? process.env.EMAIL_USER : 'None'}`);
 });
+module.exports = app;
