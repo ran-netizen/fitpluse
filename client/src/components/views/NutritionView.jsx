@@ -14,9 +14,11 @@ import {
   Scale,
   Target,
   Sparkles,
-  Info
+  Info,
+  Calendar
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { formatLocalDate, getTodayDateStr, getYesterdayDateStr } from '../../utils/dateUtils';
 
 const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
 
@@ -42,27 +44,61 @@ const computeRecommendations = (weightKg, goal) => {
 const NutritionView = () => {
   const { user, updateNutritionTargets } = useAuth();
 
-  // Hydration state with localStorage
-  const [waterMl, setWaterMl] = useState(() => {
-    const saved = localStorage.getItem('fitpulse_water_ml');
-    return saved ? Number(saved) : 1750;
+  const todayDateStr = getTodayDateStr();
+  const yesterdayDateStr = getYesterdayDateStr();
+  const [selectedDate, setSelectedDate] = useState(todayDateStr);
+
+  // Daily Hydration state with localStorage
+  const [dailyWaterMap, setDailyWaterMap] = useState(() => {
+    const savedDaily = localStorage.getItem('fitpulse_daily_water');
+    if (savedDaily) {
+      try {
+        return JSON.parse(savedDaily) || {};
+      } catch (e) {
+        return {};
+      }
+    }
+    // Backward compatibility: If legacy fitpulse_water_ml exists, assign it to yesterday
+    const legacyWater = localStorage.getItem('fitpulse_water_ml');
+    const initialMap = {};
+    if (legacyWater && Number(legacyWater) > 0) {
+      initialMap[getYesterdayDateStr()] = Number(legacyWater);
+      localStorage.setItem('fitpulse_daily_water', JSON.stringify(initialMap));
+    }
+    return initialMap;
   });
   const waterGoal = 3000;
+  const currentWaterMl = dailyWaterMap[selectedDate] || 0;
 
-  // Meal Logs state with localStorage
+  // Meal Logs state with localStorage & legacy date migration
   const [meals, setMeals] = useState(() => {
     const saved = localStorage.getItem('fitpulse_meals');
+    const yestStr = getYesterdayDateStr();
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          let migratedAny = false;
+          const migrated = parsed.map((m) => {
+            if (m.date) return m;
+            migratedAny = true;
+            const timestamp = Number(m.id);
+            if (timestamp > 1000000000000) {
+              const dStr = formatLocalDate(new Date(timestamp));
+              return { ...m, date: dStr || yestStr };
+            }
+            return { ...m, date: yestStr };
+          });
+          if (migratedAny) {
+            localStorage.setItem('fitpulse_meals', JSON.stringify(migrated));
+          }
+          return migrated;
+        }
       } catch (e) {
         return [];
       }
     }
-    return [
-      { id: '1', type: 'Breakfast', name: 'Oatmeal & Whey Protein Shake', calories: 450, protein: 35 },
-      { id: '2', type: 'Lunch', name: 'Grilled Chicken Breast, Brown Rice & Broccoli', calories: 650, protein: 55 }
-    ];
+    return [];
   });
 
   // New Meal Form
@@ -134,8 +170,12 @@ const NutritionView = () => {
   const isCustomCalorie = user?.customCalorieTarget !== null && user?.customCalorieTarget !== undefined && user?.customCalorieTarget !== '';
   const isCustomProtein = user?.customProteinTarget !== null && user?.customProteinTarget !== undefined && user?.customProteinTarget !== '';
 
-  const totalCaloriesConsumed = meals.reduce((acc, m) => acc + (Number(m.calories) || 0), 0);
-  const totalProteinConsumed = meals.reduce((acc, m) => acc + (Number(m.protein) || 0), 0);
+  const displayedMeals = useMemo(() => {
+    return meals.filter((m) => m.date === selectedDate);
+  }, [meals, selectedDate]);
+
+  const totalCaloriesConsumed = displayedMeals.reduce((acc, m) => acc + (Number(m.calories) || 0), 0);
+  const totalProteinConsumed = displayedMeals.reduce((acc, m) => acc + (Number(m.protein) || 0), 0);
 
   const caloriePercent = Math.min(Math.round((totalCaloriesConsumed / dailyCalorieBudget) * 100), 100);
   const proteinPercent = Math.min(Math.round((totalProteinConsumed / dailyProteinTarget) * 100), 100);
@@ -174,14 +214,23 @@ const NutritionView = () => {
 
   // Hydration handlers
   const handleAddWater = (amount) => {
-    const updated = Math.min(waterMl + amount, 5000);
-    setWaterMl(updated);
-    localStorage.setItem('fitpulse_water_ml', updated.toString());
+    const currentForDay = dailyWaterMap[selectedDate] || 0;
+    const updated = Math.min(currentForDay + amount, 5000);
+    const newMap = { ...dailyWaterMap, [selectedDate]: updated };
+    setDailyWaterMap(newMap);
+    localStorage.setItem('fitpulse_daily_water', JSON.stringify(newMap));
+    if (selectedDate === todayDateStr) {
+      localStorage.setItem('fitpulse_water_ml', updated.toString());
+    }
   };
 
   const handleResetWater = () => {
-    setWaterMl(0);
-    localStorage.setItem('fitpulse_water_ml', '0');
+    const newMap = { ...dailyWaterMap, [selectedDate]: 0 };
+    setDailyWaterMap(newMap);
+    localStorage.setItem('fitpulse_daily_water', JSON.stringify(newMap));
+    if (selectedDate === todayDateStr) {
+      localStorage.setItem('fitpulse_water_ml', '0');
+    }
   };
 
   // Meal handlers
@@ -195,7 +244,9 @@ const NutritionView = () => {
       name: mealName.trim(),
       calories: Number(mealCalories),
       protein: Number(mealProtein) || 0,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      date: selectedDate,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date().toISOString()
     };
 
     const updated = [newMeal, ...meals];
@@ -215,6 +266,72 @@ const NutritionView = () => {
 
   return (
     <div className="space-y-6">
+      {/* Date Navigation Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+            <Calendar className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-white">
+                {selectedDate === todayDateStr
+                  ? "Today's Nutrition"
+                  : selectedDate === yesterdayDateStr
+                  ? "Yesterday's Nutrition"
+                  : `Nutrition for ${selectedDate}`}
+              </h3>
+              {selectedDate === todayDateStr && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  Today
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400">
+              {new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, {
+                weekday: 'long',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+              })}
+            </p>
+          </div>
+        </div>
+
+        {/* Quick Date Pills */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSelectedDate(yesterdayDateStr)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              selectedDate === yesterdayDateStr
+                ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
+                : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            Yesterday
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedDate(todayDateStr)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+              selectedDate === todayDateStr
+                ? 'bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20'
+                : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            Today
+          </button>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+            className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            title="Select specific date"
+          />
+        </div>
+      </div>
+
       {/* Top Banner Nutrition Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         
@@ -307,7 +424,7 @@ const NutritionView = () => {
             </div>
           </div>
           <p className="text-2xl font-black text-white">
-            {waterMl} <span className="text-xs font-normal text-slate-500">/ {waterGoal} ml</span>
+            {currentWaterMl} <span className="text-xs font-normal text-slate-500">/ {waterGoal} ml</span>
           </p>
           <div className="flex items-center gap-2 mt-3">
             <button
@@ -420,9 +537,13 @@ const NutritionView = () => {
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <PieChart className="w-4 h-4 text-emerald-400" />
-                Today's Meals
+                {selectedDate === todayDateStr
+                  ? "Today's Meals"
+                  : selectedDate === yesterdayDateStr
+                  ? "Yesterday's Meals"
+                  : `Meals for ${selectedDate}`}
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                  {meals.length}
+                  {displayedMeals.length}
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400">Breakdown of calories and macros consumed</p>
@@ -432,17 +553,19 @@ const NutritionView = () => {
             </span>
           </div>
 
-          {meals.length === 0 ? (
+          {displayedMeals.length === 0 ? (
             <div className="text-center py-12 px-4 rounded-xl border border-dashed border-slate-800">
               <Utensils className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-              <p className="text-xs font-semibold text-slate-300">No meals logged today</p>
+              <p className="text-xs font-semibold text-slate-300">
+                {selectedDate === todayDateStr ? "No meals logged today" : "No meals logged for this date"}
+              </p>
               <p className="text-[11px] text-slate-500 mt-1">
                 Log breakfast, lunch, or snacks to track your nutrition!
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {meals.map((m) => (
+              {displayedMeals.map((m) => (
                 <div
                   key={m.id}
                   className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 transition-all flex items-center justify-between gap-3 group"

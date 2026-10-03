@@ -14,6 +14,7 @@ import {
   Zap,
   Check
 } from 'lucide-react';
+import { formatLocalDate, getStartOfWeek, getTodayDateStr } from '../utils/dateUtils';
 
 const GOAL_PRESETS = [
   { name: 'Strength & Muscle', sessions: 4, calories: 2000, desc: '4 heavy sessions/week' },
@@ -48,23 +49,16 @@ const WeeklyProgress = ({ workouts }) => {
   // Chart Metric state: 'volume' | 'duration' | 'calories'
   const [chartMetric, setChartMetric] = useState('volume');
 
-  // Helper to determine start of current week (Monday)
-  const getStartOfWeek = () => {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(now.setDate(diff));
-    monday.setHours(0, 0, 0, 0);
-    return monday;
-  };
-
   const startOfWeek = getStartOfWeek();
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(endOfWeek.getDate() + 7);
 
   // Filter workouts for current week (safely guarded)
   const safeWorkouts = Array.isArray(workouts) ? workouts : [];
   const thisWeekWorkouts = safeWorkouts.filter((w) => {
+    if (!w.createdAt) return false;
     const wDate = new Date(w.createdAt);
-    return wDate >= startOfWeek;
+    return wDate >= startOfWeek && wDate < endOfWeek;
   });
 
   const workoutsCount = thisWeekWorkouts.length;
@@ -123,13 +117,15 @@ const WeeklyProgress = ({ workouts }) => {
 
   // 7-day data aggregator (Mon - Sun)
   const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const todayDateStr = getTodayDateStr();
+
   const dailyStats = daysOfWeek.map((dayName, idx) => {
     const d = new Date(startOfWeek);
     d.setDate(d.getDate() + idx);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = formatLocalDate(d);
 
     const dayWorkouts = thisWeekWorkouts.filter(
-      (w) => w.createdAt && w.createdAt.split('T')[0] === dateStr
+      (w) => w.createdAt && formatLocalDate(new Date(w.createdAt)) === dateStr
     );
 
     const volume = dayWorkouts.reduce((acc, curr) => {
@@ -148,7 +144,7 @@ const WeeklyProgress = ({ workouts }) => {
       return acc + (c !== undefined && c !== null ? Number(c) : (Number(curr.duration) || 0) * 7);
     }, 0);
 
-    const isToday = new Date().toISOString().split('T')[0] === dateStr;
+    const isToday = dateStr === todayDateStr;
 
     return {
       name: dayName,

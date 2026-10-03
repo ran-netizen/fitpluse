@@ -10,6 +10,7 @@ import {
   Flame,
   FileSpreadsheet
 } from 'lucide-react';
+import { formatLocalDate, getTodayDateStr } from '../utils/dateUtils';
 
 const WorkoutList = ({ workouts, onDeleteWorkout, loading }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,7 +58,7 @@ const WorkoutList = ({ workouts, onDeleteWorkout, loading }) => {
       const headers = ['Date', 'Exercise Name', 'Duration (mins)', 'Sets', 'Reps', 'Load (kg)', 'Calories Burned (kcal)'];
 
       const rows = workouts.map((w) => {
-        const dateStr = w.createdAt ? new Date(w.createdAt).toISOString().split('T')[0] : '';
+        const dateStr = w.createdAt ? formatLocalDate(new Date(w.createdAt)) : '';
         const name = (w.title || w.exercise || 'Workout').replace(/"/g, '""');
         const duration = w.duration || 0;
         const sets = w.sets || 1;
@@ -81,7 +82,7 @@ const WorkoutList = ({ workouts, onDeleteWorkout, loading }) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
 
-      const dateTag = new Date().toISOString().slice(0, 10);
+      const dateTag = getTodayDateStr();
       link.setAttribute('href', url);
       link.setAttribute('download', `fitpulse_workouts_${dateTag}.csv`);
       document.body.appendChild(link);

@@ -15,6 +15,7 @@ import {
   Trophy,
   CheckCircle2
 } from 'lucide-react';
+import { getStartOfWeek, getTodayDateStr } from '../../utils/dateUtils';
 
 const QUICK_PRESETS = ['Bench Press', 'Squats', 'Deadlift', 'Running', 'Bicep Curls'];
 
@@ -27,21 +28,43 @@ const OverviewView = ({
 }) => {
   const safeWorkouts = Array.isArray(workouts) ? workouts : [];
 
-  // Water Tracker State with localStorage persistence
+  const todayDateStr = getTodayDateStr();
+
+  // Water Tracker State with daily persistence
   const [waterMl, setWaterMl] = useState(() => {
-    const saved = localStorage.getItem('fitpulse_water_ml');
-    return saved ? Number(saved) : 1750;
+    try {
+      const savedDaily = localStorage.getItem('fitpulse_daily_water');
+      if (savedDaily) {
+        const parsed = JSON.parse(savedDaily);
+        if (parsed && typeof parsed[todayDateStr] === 'number') {
+          return parsed[todayDateStr];
+        }
+      }
+    } catch (e) {}
+    return 0;
   });
   const waterGoal = 3000;
 
   const handleAddWater = (amount) => {
     const updated = Math.min(waterMl + amount, 5000);
     setWaterMl(updated);
+    try {
+      const savedDaily = localStorage.getItem('fitpulse_daily_water');
+      const dailyMap = savedDaily ? JSON.parse(savedDaily) : {};
+      dailyMap[todayDateStr] = updated;
+      localStorage.setItem('fitpulse_daily_water', JSON.stringify(dailyMap));
+    } catch (e) {}
     localStorage.setItem('fitpulse_water_ml', updated.toString());
   };
 
   const handleResetWater = () => {
     setWaterMl(0);
+    try {
+      const savedDaily = localStorage.getItem('fitpulse_daily_water');
+      const dailyMap = savedDaily ? JSON.parse(savedDaily) : {};
+      dailyMap[todayDateStr] = 0;
+      localStorage.setItem('fitpulse_daily_water', JSON.stringify(dailyMap));
+    } catch (e) {}
     localStorage.setItem('fitpulse_water_ml', '0');
   };
 
@@ -55,18 +78,14 @@ const OverviewView = ({
   const [quickMsg, setQuickMsg] = useState('');
 
   // Weekly calculations
-  const getStartOfWeek = () => {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(now.setDate(diff));
-    monday.setHours(0, 0, 0, 0);
-    return monday;
-  };
   const startOfWeek = getStartOfWeek();
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(endOfWeek.getDate() + 7);
 
   const thisWeekWorkouts = safeWorkouts.filter((w) => {
-    return w.createdAt && new Date(w.createdAt) >= startOfWeek;
+    if (!w.createdAt) return false;
+    const wDate = new Date(w.createdAt);
+    return wDate >= startOfWeek && wDate < endOfWeek;
   });
 
   const weeklySessionsGoal = Number(localStorage.getItem('fitpulse_weekly_goal')) || 5;
